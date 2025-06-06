@@ -68,11 +68,14 @@ def process_one_file(arguments):
     fn, args = arguments
     fn_stem = fn.stem
     output_path = pathlib.Path(args.output)
-    solid = load_step(fn)[0]  # Assume there's one solid per file
-    graph = build_graph(
-        solid, args.curv_u_samples, args.surf_u_samples, args.surf_v_samples
-    )
-    dgl.data.utils.save_graphs(str(output_path.joinpath(fn_stem + ".bin")), [graph])
+    try:
+        solid = load_step(fn)[0]  # Assume there's one solid per file
+        graph = build_graph(
+            solid, args.curv_u_samples, args.surf_u_samples, args.surf_v_samples
+        )
+        dgl.data.utils.save_graphs(str(output_path.joinpath(fn_stem + ".bin")), [graph])
+    except IndexError:
+        print("No solids in part",fn)
 
 
 def initializer():
