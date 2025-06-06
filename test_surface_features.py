@@ -13,6 +13,8 @@ from occwl.face import Face
 import networkx as nx
 from itertools import combinations, permutations
 import matplotlib.pyplot as plt
+from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.BRepBndLib import brepbndlib_Add
 
 
 def plot_two_histograms(
@@ -80,81 +82,6 @@ def dihedral_angle(edge, face1, face2):
         arr=edge_points,
     )
     return mean_angle_between(face1_normals, face2_normals)
-
-
-bin_dir = "/mnt/d/Work/Datasets/synthcad/bin/"
-step_dir = "/mnt/d/Work/Datasets/synthcad/step"
-bin_files = glob(os.path.join(bin_dir, "*.bin"))
-step_files = glob(os.path.join(step_dir, "*.stp"))
-
-solid = load_step(step_files[0])[0]
-(graph,), add_data = load_graphs(bin_files[0])
-graph
-areas = []
-loops = []
-counts = []
-solid_graph = face_adjacency(solid)
-for node_idx, face in solid_graph.nodes(data=True):
-    areas.append(face["face"].area())
-    loops.append(len(list(face["face"].wires())))
-    counts.append(solid_graph.in_degree[node_idx])
-# Edge features
-lengths = []
-angle = []
-for node1_idx, node2_idx, edge in solid_graph.edges(data=True):
-    lengths.append(edge["edge"].length())
-    angle.append(
-        dihedral_angle(
-            edge["edge"],
-            solid_graph.nodes[node1_idx]["face"],
-            solid_graph.nodes[node2_idx]["face"],
-        )
-    )
-
-print(lengths)
-print(graph.edata["l"])
-# Getting diagonal length bounding box
-# Get the bounding box of the solid
-shape = solid._shape
-# getting additional data
-
-# region a3 and d2
-# getting a3 and d2 data
-# Compute the bounding box
-from OCC.Core.Bnd import Bnd_Box
-from OCC.Core.BRepBndLib import brepbndlib_Add
-
-bbox = Bnd_Box()
-brepbndlib_Add(shape, bbox)
-
-# Retrieve the bounding box limits
-xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
-
-# Compute the diagonal length
-min_corner = np.array([xmin, ymin, zmin])
-max_corner = np.array([xmax, ymax, zmax])
-diagonal_length = np.linalg.norm(max_corner - min_corner)
-
-print("Bounding box diagonal length:", diagonal_length)
-
-
-# For highly distorted faces I have to use area-weighted sampling
-# So if i would get problem with those surfaces i'll know that problem
-# is with sampling method
-# def sample_random_points_on_face(face: Face, num_points: int):
-#     uv_box = face.uv_bounds()
-#     umin, vmin = uv_box.min_point()
-#     umax, vmax = uv_box.max_point()
-#     points = []
-#     while len(points) < num_points:
-#         u = random.uniform(umin, umax)
-#         v = random.uniform(vmin, vmax)
-#         pt = face.point((u, v))
-#         if face.inside((u, v)):
-#             pt = face.point((u, v))
-#             points.append(pt)
-#     points = np.array(points)
-#     return points
 
 
 def sample_random_points_on_face(faces: [Face], num_points: int):
@@ -259,7 +186,7 @@ def sample_random_points_on_2_faces_for_A3(face1: Face, face2: Face, num_points:
     # return points.reshape(num_points, 3, 3)
 
 
-def d2_metric_evaluation(face1, face2):
+def d2_metric_evaluation(face1, face2, diagonal_length):
     points = sample_random_points_on_2_faces(face1, face2, 512)
     diff = points[:, :, 0] - points[:, :, 1]  # Shape: (n, n, d)
 
@@ -305,44 +232,118 @@ def a3_metric_evaluation(face1, face2):
     return normalized_frequencies
 
 
-# engregion
+def main():
+    bin_dir = "/mnt/d/Work/Datasets/synthcad/bin/"
+    step_dir = "/mnt/d/Work/Datasets/synthcad/step"
+    bin_files = glob(os.path.join(bin_dir, "*.bin"))
+    step_files = glob(os.path.join(step_dir, "*.stp"))
 
-# region
-# Compute the distance between faces
-graph_diameter = nx.diameter(solid_graph)
-number_of_faces = len(solid_graph.nodes)
-edge_index_map = {edge: idx for idx, edge in enumerate(solid_graph.edges())}
-d2_distances = np.zeros((number_of_faces, number_of_faces, 64))
-a3_distances = np.zeros((number_of_faces, number_of_faces, 64))
-spatial_pos = np.zeros((number_of_faces, number_of_faces))
-edges_path = -np.ones((number_of_faces, number_of_faces, graph_diameter))
-for face1_idx, face2_idx in permutations(solid_graph.nodes, 2):
-    face1 = solid_graph.nodes[face1_idx]["face"]
-    face2 = solid_graph.nodes[face2_idx]["face"]
-    path_between_faces = nx.shortest_path(solid_graph, face1_idx, face2_idx)
-    path_length = len(path_between_faces) - 1
-    spatial_pos[face1_idx, face2_idx] = path_length
-    spatial_pos[face2_idx, face1_idx] = path_length
-    edges_path_list = [
-        edge_index_map[(i, j)]
-        for i, j in zip(path_between_faces, path_between_faces[1:])
-    ]
-    edges_path_array = np.asarray(edges_path_list)
-    edges_path[face1_idx, face2_idx, : len(edges_path_list)] = edges_path_array
-    d2_distances[face1_idx, face2_idx, :] = d2_metric_evaluation(face1, face2)
-    a3_distances[face1_idx, face2_idx, :] = a3_metric_evaluation(face1, face2)
-    # Гистограммы сходятся не очень хорошо, возможны два варианта я неправильно раскидываю точки
-    # либо я неправильно считаю угол, причем мне кажется что скорее точки не очень раскидываю, возможно надо взвешенно по площади
-    # я не попадаю на поверхность
-    plot_two_histograms(
-        a3_distances[face1_idx, face2_idx, :],
-        add_data["angle_distance"][face1_idx, face2_idx, :],
-        filename="hystogram{face1_idx}_{face2_idx}.png".format(
-            face1_idx=face1_idx, face2_idx=face2_idx
-        ),
-    )
-print(edges_path)
-plot_two_histograms(a3_distances[4, 0, :], add_data["angle_distance"][4, 0, :])
-# for i in range(100):a
-#     (graph,), add_data = load_graphs(bin_files[i])
-#     print(add_data["edges_path"].shape)
+    solid = load_step(step_files[0])[0]
+    (graph,), add_data = load_graphs(bin_files[0])
+    graph
+    areas = []
+    loops = []
+    counts = []
+    solid_graph = face_adjacency(solid)
+    for node_idx, face in solid_graph.nodes(data=True):
+        areas.append(face["face"].area())
+        loops.append(len(list(face["face"].wires())))
+        counts.append(solid_graph.in_degree[node_idx])
+    # Edge features
+    lengths = []
+    angle = []
+    for node1_idx, node2_idx, edge in solid_graph.edges(data=True):
+        lengths.append(edge["edge"].length())
+        angle.append(
+            dihedral_angle(
+                edge["edge"],
+                solid_graph.nodes[node1_idx]["face"],
+                solid_graph.nodes[node2_idx]["face"],
+            )
+        )
+
+    print(lengths)
+    print(graph.edata["l"])
+    # Getting diagonal length bounding box
+    # Get the bounding box of the solid
+    shape = solid._shape
+    # getting additional data
+
+    # region a3 and d2
+    # getting a3 and d2 data
+    # Compute the bounding box
+    bbox = Bnd_Box()
+    brepbndlib_Add(shape, bbox)
+
+    # Retrieve the bounding box limits
+    xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
+
+    # Compute the diagonal length
+    min_corner = np.array([xmin, ymin, zmin])
+    max_corner = np.array([xmax, ymax, zmax])
+    diagonal_length = np.linalg.norm(max_corner - min_corner)
+
+    print("Bounding box diagonal length:", diagonal_length)
+
+    # For highly distorted faces I have to use area-weighted sampling
+    # So if i would get problem with those surfaces i'll know that problem
+    # is with sampling method
+    # def sample_random_points_on_face(face: Face, num_points: int):
+    #     uv_box = face.uv_bounds()
+    #     umin, vmin = uv_box.min_point()
+    #     umax, vmax = uv_box.max_point()
+    #     points = []
+    #     while len(points) < num_points:
+    #         u = random.uniform(umin, umax)
+    #         v = random.uniform(vmin, vmax)
+    #         pt = face.point((u, v))
+    #         if face.inside((u, v)):
+    #             pt = face.point((u, v))
+    #             points.append(pt)
+    #     points = np.array(points)
+    #     return points
+
+    # engregion
+
+    # region
+    # Compute the distance between faces
+    graph_diameter = nx.diameter(solid_graph)
+    number_of_faces = len(solid_graph.nodes)
+    edge_index_map = {edge: idx for idx, edge in enumerate(solid_graph.edges())}
+    d2_distances = np.zeros((number_of_faces, number_of_faces, 64))
+    a3_distances = np.zeros((number_of_faces, number_of_faces, 64))
+    spatial_pos = np.zeros((number_of_faces, number_of_faces))
+    edges_path = -np.ones((number_of_faces, number_of_faces, graph_diameter))
+    for face1_idx, face2_idx in permutations(solid_graph.nodes, 2):
+        face1 = solid_graph.nodes[face1_idx]["face"]
+        face2 = solid_graph.nodes[face2_idx]["face"]
+        path_between_faces = nx.shortest_path(solid_graph, face1_idx, face2_idx)
+        path_length = len(path_between_faces) - 1
+        spatial_pos[face1_idx, face2_idx] = path_length
+        spatial_pos[face2_idx, face1_idx] = path_length
+        edges_path_list = [
+            edge_index_map[(i, j)]
+            for i, j in zip(path_between_faces, path_between_faces[1:])
+        ]
+        edges_path_array = np.asarray(edges_path_list)
+        edges_path[face1_idx, face2_idx, : len(edges_path_list)] = edges_path_array
+        d2_distances[face1_idx, face2_idx, :] = d2_metric_evaluation(
+            face1, face2, diagonal_length
+        )
+        a3_distances[face1_idx, face2_idx, :] = a3_metric_evaluation(face1, face2)
+        # Гистограммы сходятся не очень хорошо, возможны два варианта я неправильно раскидываю точки
+        # либо я неправильно считаю угол, причем мне кажется что скорее точки не очень раскидываю, возможно надо взвешенно по площади
+        # я не попадаю на поверхность
+        # plot_two_histograms(
+        #     a3_distances[face1_idx, face2_idx, :],
+        #     add_data["angle_distance"][face1_idx, face2_idx, :],
+        #     filename="hystogram{face1_idx}_{face2_idx}.png".format(
+        #         face1_idx=face1_idx, face2_idx=face2_idx
+        #     ),
+        # )
+    print(edges_path)
+    return a3_distances
+    # plot_two_histograms(a3_distances[4, 0, :], add_data["angle_distance"][4, 0, :])
+    # for i in range(100):a
+    #     (graph,), add_data = load_graphs(bin_files[i])
+    #     print(add_data["edges_path"].shape)
