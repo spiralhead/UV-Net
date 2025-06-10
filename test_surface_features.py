@@ -234,8 +234,8 @@ def a3_metric_evaluation(face1, face2):
 
 
 def main():
-    bin_dir = "/mnt/d/Work/Datasets/synthcad/bin/"
-    step_dir = "/mnt/d/Work/Datasets/synthcad/step"
+    bin_dir = "./examples/bin/"
+    step_dir = "./examples/step"
     bin_files = glob(os.path.join(bin_dir, "*.bin"))
     step_files = glob(os.path.join(step_dir, "*.stp"))
 
