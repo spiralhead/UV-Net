@@ -12,7 +12,8 @@ import random
 from occwl.face import Face
 import networkx as nx
 from itertools import combinations, permutations
-import matplotlib.pyplot as plt
+
+# import matplotlib.pyplot as plt
 from OCC.Core.Bnd import Bnd_Box
 from OCC.Core.BRepBndLib import brepbndlib_Add
 
@@ -347,3 +348,7 @@ def main():
     # for i in range(100):a
     #     (graph,), add_data = load_graphs(bin_files[i])
     #     print(add_data["edges_path"].shape)
+
+
+if __name__ == "__main__":
+    print(main())
